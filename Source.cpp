@@ -6,6 +6,7 @@
 
 #include <iostream>
 #include <opencv2/opencv.hpp>
+#include <opencv2/features2d.hpp>
 #include <opencv2/core.hpp>
 #include <opencv2/highgui.hpp>
 #include <opencv2/imgproc.hpp>
@@ -18,74 +19,173 @@
 using namespace std;
 using namespace cv;
 
-
-/// Global variables
-
-Mat src, src_gray;
-Mat dst, detected_edges;
-
-//defind parameter of canny edge
-int edgeThresh = 1;
-int lowThreshold = 20;
-int const max_lowThreshold = 100;
-int ratio_canny = 2;
-int kernel_size = 3;
-char* window_name = "Edge Map";
-
 /**
  * @function CannyThreshold
  * @brief Trackbar callback - Canny thresholds input with a ratio 1:3
  */
-void CannyThreshold(int, void*)
+// Global variables
+
+Mat src1, src_gray1,src2, src_gray2;
+//image with edge detection
+Mat dst1, detected_edges1, dst2, detected_edges2;
+
+//defind parameter of canny edge
+int edgeThresh = 1;
+int lowThreshold = 30;
+int const max_lowThreshold = 100;
+int ratio_canny = 2;
+int kernel_size = 3;
+
+/*Main function of canny detect edge
+* 
+	param1 (int) : Using for threshold of the image
+	im (Mat): the source image
+	imEdge (Mat): Edge map of the image
+*/
+void CannyThreshold(int)
 {
-	/// Reduce noise with a kernel 3x3
-	blur(src_gray, detected_edges, Size(3, 3));
+	// Reduce noise with a kernel 3x3
+	blur(src_gray1, detected_edges1, Size(3, 3));
+	blur(src_gray2, detected_edges2, Size(3, 3));
 
-	/// Canny detector
-	Canny(detected_edges, detected_edges, lowThreshold, lowThreshold*ratio_canny, kernel_size);
+	// Canny detector
+	Canny(detected_edges1, detected_edges1, lowThreshold, lowThreshold* ratio_canny, kernel_size);
+	Canny(detected_edges2, detected_edges2, lowThreshold, lowThreshold* ratio_canny, kernel_size);
+	// Using Canny's output as a mask, we display our result
+	dst1 = Scalar::all(0);
+	dst2 = Scalar::all(0);
 
-	/// Using Canny's output as a mask, we display our result
-	dst = Scalar::all(0);
-
-	src.copyTo(dst, detected_edges);
-	imshow(window_name, dst);
+	src1.copyTo(dst1, detected_edges1);
+	src2.copyTo(dst2, detected_edges2);
 }
-//Edge detection
+
+//**End Canny detect edge**//
 
 
-int main() {
 
-	//Read image for file
-	string refFilename("lena5.jpg");
+
+
+/*
+Homograph detect misalign image
+*/
+
+//Max features of 2 image
+const int MAX_FEATURES = 500;
+const float GOOD_MATCH_PERCENT = 0.15f;
+
+//Function of misalignment detect 2 picture of output of canny detect edge
+//Processing on gray image only
+void alignImages(Mat &im1, Mat &im2, Mat &im1Reg, Mat &h)
+
+{
+	// Convert images to grayscale
+	Mat im1Gray, im2Gray;
+	cvtColor(im1, im1Gray, CV_BGR2GRAY);
+	cvtColor(im2, im2Gray, CV_BGR2GRAY);
+
+	// Variables to store keypoints and descriptors
+	std::vector<KeyPoint> keypoints1, keypoints2;
+	Mat descriptors1, descriptors2;
+
+	// Detect ORB features and compute descriptors.
+	Ptr<Feature2D> orb = ORB::create(MAX_FEATURES);
+	orb->detectAndCompute(im1Gray, Mat(), keypoints1, descriptors1);
+	orb->detectAndCompute(im2Gray, Mat(), keypoints2, descriptors2);
+
+	// Match features.
+	std::vector<DMatch> matches;
+	Ptr<DescriptorMatcher> matcher = DescriptorMatcher::create("BruteForce-Hamming");
+	matcher->match(descriptors1, descriptors2, matches, Mat());
+
+	// Sort matches by score
+	std::sort(matches.begin(), matches.end());
+
+	// Remove not so good matches
+	const int numGoodMatches = matches.size() * GOOD_MATCH_PERCENT;
+	matches.erase(matches.begin() + numGoodMatches, matches.end());
+
+
+	// Draw top matches
+	Mat imMatches;
+	drawMatches(im1, keypoints1, im2, keypoints2, matches, imMatches);
+	imwrite("matches.jpg", imMatches);
+
+
+	// Extract location of good matches
+	std::vector<Point2f> points1, points2;
+
+	for (size_t i = 0; i < matches.size(); i++)
+	{
+		points1.push_back(keypoints1[matches[i].queryIdx].pt);
+		points2.push_back(keypoints2[matches[i].trainIdx].pt);
+	}
+
+	// Find homography
+	h = findHomography(points1, points2, RANSAC);
+
+	// Use homography to warp image
+	warpPerspective(im1, im1Reg, h, im2.size());
+
+}
+//End of homograph detection.
+
+
+
+/*
+*	This is main function of Image_processing
+	Function using canny detect edge and compare homograph for detect
+	missalignment
+*
+*/
+int main(int argc, char **argv)
+{
+	// Read reference image
+	string refFilename("form.jpg");
 	cout << "Reading reference image : " << refFilename << endl;
+	Mat imReference = imread(refFilename);
 
-	//Mat is using to store the reference image, vector
-	Mat imProcess_Pure = imread(refFilename);
-	src = imProcess_Pure;
 
-	// Check the image already opened
-	if (src.empty())
-		std::cout << "failed to open lena5.jpg" << std::endl;
-	else
-		std::cout << "lena5.jpg loaded OK" << std::endl;
+	// Read image to be aligned
+	string imFilename("scanned-form.jpg");
+	cout << "Reading image to align : " << imFilename << endl;
+	Mat im = imread(imFilename);
 
 	// Create a matrix of the same type and size as src (for dst)
-	dst.create(src.size(), src.type());
+	dst1.create(src1.size(), src1.type());
+	dst2.create(src2.size(), src2.type());
 
-	//Convert to gray
-	Mat imProcess_Gray;
-	cvtColor(imProcess_Pure, imProcess_Gray, CV_BGR2GRAY);
+	//Detect edge using canny algorimths
+	src1 = imReference;
+	src2 = im;
 
-	//src is the imProcess_Gray
-	src_gray = imProcess_Gray;
+	//Transfer image to gray
+	cvtColor(src1, src_gray1, CV_BGR2GRAY);
+	cvtColor(src2, src_gray2, CV_BGR2GRAY);
 
-	// Create a Trackbar for user to enter threshold
-	createTrackbar("Min Threshold:", window_name, &lowThreshold, max_lowThreshold, CannyThreshold);
+	//imReference convert to edge detect
+	CannyThreshold(100);
 
-	// Show the image
-	CannyThreshold(100, window_name);
+	// Registered image will be resotred in imReg. 
+	// The estimated homography will be stored in h. 
+	Mat imReg, h;
+
+	// Align images
+	cout << "Aligning images ..." << endl;
+	alignImages(dst1, dst2, imReg, h);
+
+	// Write aligned image to disk. 
+	string outFilename("aligned.jpg");
+	cout << "Saving aligned image : " << outFilename << endl;
+	imwrite(outFilename, imReg);
+
+	// Print estimated homography
+	cout << "Estimated homography : \n" << h << endl;
 
 	//Display the image sec
 	waitKey(0);
-	system("pause");
+
+	system ("pause");
+	return 0;
+
+
 }
