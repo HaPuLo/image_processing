@@ -15,8 +15,10 @@
 #include <opencv2/cvconfig.h>
 #include <math.h>
 
+
 using namespace std;
 using namespace cv;
+
 
 
 /// Global variables
@@ -56,11 +58,12 @@ void CannyThreshold(int, void*)
 int main(){
 
 	//Read image for file
-	string refFilename("lena5.jpg");
+	string refFilename("POR1.jpg");
 	cout << "Reading reference image : " << refFilename << endl;
 
 	//Mat is using to store the reference image, vector
 	Mat imProcess_Pure = imread(refFilename);
+
 	src = imProcess_Pure;
 
 	// Check the image already opened
@@ -72,9 +75,11 @@ int main(){
 	// Create a matrix of the same type and size as src (for dst)
   	dst.create( src.size(), src.type() );
 
+
 	//Convert to gray
 	Mat imProcess_Gray;
 	cvtColor(imProcess_Pure, imProcess_Gray, CV_BGR2GRAY);
+
 
 	//src is the imProcess_Gray
 	src_gray = imProcess_Gray;
@@ -85,7 +90,7 @@ int main(){
   	// Show the image
   	CannyThreshold(100, window_name);
 
-	//Display the image sec
-	waitKey(0);
+	//Display the image sec	waitKey(0);
 	system("pause");
-}	
+  return 0;
+}
