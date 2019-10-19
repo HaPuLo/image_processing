@@ -1,91 +1,110 @@
-/*image_processing
- This project will be used for study image processing.
- The first we will learn to using opencv library. All project use C++ to do all task.
-*/
-
-
-#include <iostream>
 #include <opencv2/opencv.hpp>
+#include <opencv2/features2d.hpp>
 #include <opencv2/core.hpp>
-#include <opencv2/highgui.hpp>
-#include <opencv2/imgproc.hpp>
-#include <opencv2/objdetect.hpp>
-#include <opencv2/video.hpp>
-#include <opencv2/highgui/highgui_c.h>
-#include <opencv2/cvconfig.h>
+#include"opencv2/highgui.hpp"
+#include"opencv2/imgproc.hpp"
+#include"opencv2/objdetect.hpp"
+#include"opencv2/video.hpp"
+#include"opencv2/highgui/highgui_c.h"
 #include <math.h>
 
 using namespace std;
 using namespace cv;
 
+const int MAX_FEATURES = 500;
+const float GOOD_MATCH_PERCENT = 0.15f;
 
-/// Global variables
 
-Mat src, src_gray;
-Mat dst, detected_edges;
+void alignImages(Mat &im1, Mat &im2, Mat &im1Reg, Mat &h)
 
-//defind parameter of canny edge
-int edgeThresh = 1;
-int lowThreshold = 30;
-int const max_lowThreshold = 100;
-int ratio = 2;
-int kernel_size = 3;
-char* window_name = "Edge Map";
-
-/**
- * @function CannyThreshold
- * @brief Trackbar callback - Canny thresholds input with a ratio 1:3
- */
-void CannyThreshold(int, void*)
 {
-	/// Reduce noise with a kernel 3x3
-	blur(src_gray, detected_edges, Size(3, 3));
 
-	/// Canny detector
-	Canny(detected_edges, detected_edges, lowThreshold, lowThreshold*ratio, kernel_size);
+	// Convert images to grayscale
+	Mat im1Gray, im2Gray;
+	cvtColor(im1, im1Gray, CV_BGR2GRAY);
+	cvtColor(im2, im2Gray, CV_BGR2GRAY);
 
-	/// Using Canny's output as a mask, we display our result
-	dst = Scalar::all(0);
+	// Variables to store keypoints and descriptors
+	std::vector<KeyPoint> keypoints1, keypoints2;
+	Mat descriptors1, descriptors2;
 
-	src.copyTo(dst, detected_edges);
-	imshow(window_name, dst);
+	// Detect ORB features and compute descriptors.
+	Ptr<Feature2D> orb = ORB::create(MAX_FEATURES);
+	orb->detectAndCompute(im1Gray, Mat(), keypoints1, descriptors1);
+	orb->detectAndCompute(im2Gray, Mat(), keypoints2, descriptors2);
+
+	// Match features.
+	std::vector<DMatch> matches;
+	Ptr<DescriptorMatcher> matcher = DescriptorMatcher::create("BruteForce-Hamming");
+	matcher->match(descriptors1, descriptors2, matches, Mat());
+
+	// Sort matches by score
+	std::sort(matches.begin(), matches.end());
+
+	// Remove not so good matches
+	const int numGoodMatches = matches.size() * GOOD_MATCH_PERCENT;
+	matches.erase(matches.begin() + numGoodMatches, matches.end());
+
+
+	// Draw top matches
+	Mat imMatches;
+	drawMatches(im1, keypoints1, im2, keypoints2, matches, imMatches);
+	imwrite("matches.jpg", imMatches);
+
+
+	// Extract location of good matches
+	std::vector<Point2f> points1, points2;
+
+	for (size_t i = 0; i < matches.size(); i++)
+	{
+		points1.push_back(keypoints1[matches[i].queryIdx].pt);
+		points2.push_back(keypoints2[matches[i].trainIdx].pt);
+	}
+
+	// Find homography
+	h = findHomography(points1, points2, RANSAC);
+
+	// Use homography to warp image
+	warpPerspective(im1, im1Reg, h, im2.size());
+
 }
-//Edge detection
 
 
-int main() {
-
-	//Read image for file
-	string refFilename("lena5.jpg");
+int main(int argc, char **argv)
+{
+	// Read reference image
+	string refFilename("form.jpg");
 	cout << "Reading reference image : " << refFilename << endl;
+	Mat imReference = imread(refFilename);
 
-	//Mat is using to store the reference image, vector
-	Mat imProcess_Pure = imread(refFilename);
-	src = imProcess_Pure;
 
-	// Check the image already opened
-	if (src.empty())
-		std::cout << "failed to open lena5.jpg" << std::endl;
-	else
-		std::cout << "lena5.jpg loaded OK" << std::endl;
+	// Read image to be aligned
+	string imFilename("scanned-form.jpg");
+	cout << "Reading image to align : " << imFilename << endl;
+	Mat im = imread(imFilename);
 
-	// Create a matrix of the same type and size as src (for dst)
-	dst.create(src.size(), src.type());
 
-	//Convert to gray
-	Mat imProcess_Gray;
-	cvtColor(imProcess_Pure, imProcess_Gray, CV_BGR2GRAY);
+	// Registered image will be resotred in imReg. 
+	// The estimated homography will be stored in h. 
+	Mat imReg, h;
 
-	//src is the imProcess_Gray
-	src_gray = imProcess_Gray;
+	// Align images
+	cout << "Aligning images ..." << endl;
+	alignImages(im, imReference, imReg, h);
 
-	// Create a Trackbar for user to enter threshold
-	createTrackbar("Min Threshold:", window_name, &lowThreshold, max_lowThreshold, CannyThreshold);
+	// Write aligned image to disk. 
+	string outFilename("aligned.jpg");
+	cout << "Saving aligned image : " << outFilename << endl;
+	imwrite(outFilename, imReg);
 
-	// Show the image
-	CannyThreshold(100, window_name);
+	// Print estimated homography
+	cout << "Estimated homography : \n" << h << endl;
 
-	//Display the image sec
+	//display the image
 	waitKey(0);
-	system("pause");
+
+	system ("pause");
+	return 0;
+
+
 }
