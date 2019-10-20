@@ -15,6 +15,7 @@
 #include <opencv2/highgui/highgui_c.h>
 #include <opencv2/cvconfig.h>
 #include <math.h>
+#include <typeinfo>
 
 using namespace std;
 using namespace cv;
@@ -25,13 +26,15 @@ using namespace cv;
  */
 // Global variables
 
-Mat src1, src_gray1,src2, src_gray2;
+Mat src1, src_gray1, src2, src_gray2;
+Mat srcCalib1, srcCalib_gray1, srcCalib2, srcCalib_gray2;
 //image with edge detection
 Mat dst1, detected_edges1, dst2, detected_edges2;
+Mat dstCalib1, detected_edgesCalib1, dstCalib2, detected_edgesCalib2;
 
 //defind parameter of canny edge
 int edgeThresh = 1;
-int lowThreshold = 30;
+int lowThreshold = 20;
 int const max_lowThreshold = 100;
 int ratio_canny = 2;
 int kernel_size = 3;
@@ -59,6 +62,24 @@ void CannyThreshold(int)
 	src2.copyTo(dst2, detected_edges2);
 }
 
+//Canny for calib image
+void CannyThresholdCalib(int)
+{
+	// Reduce noise with a kernel 3x3
+	blur(srcCalib_gray1, detected_edgesCalib1, Size(3, 3));
+	blur(srcCalib_gray2, detected_edgesCalib2, Size(3, 3));
+
+	// Canny detector
+	Canny(detected_edgesCalib1, detected_edgesCalib1, lowThreshold, lowThreshold* ratio_canny, kernel_size);
+	Canny(detected_edgesCalib2, detected_edgesCalib2, lowThreshold, lowThreshold* ratio_canny, kernel_size);
+	// Using Canny's output as a mask, we display our result
+	dstCalib1 = Scalar::all(0);
+	dstCalib2 = Scalar::all(0);
+
+	srcCalib1.copyTo(dstCalib1, detected_edgesCalib1);
+	srcCalib2.copyTo(dstCalib2, detected_edgesCalib2);
+}
+
 //**End Canny detect edge**//
 
 
@@ -72,6 +93,8 @@ Homograph detect misalign image
 //Max features of 2 image
 const int MAX_FEATURES = 500;
 const float GOOD_MATCH_PERCENT = 0.15f;
+//POR homorgraphy 
+
 
 //Function of misalignment detect 2 picture of output of canny detect edge
 //Processing on gray image only
@@ -96,6 +119,7 @@ void alignImages(Mat &im1, Mat &im2, Mat &im1Reg, Mat &h)
 	std::vector<DMatch> matches;
 	Ptr<DescriptorMatcher> matcher = DescriptorMatcher::create("BruteForce-Hamming");
 	matcher->match(descriptors1, descriptors2, matches, Mat());
+
 
 	// Sort matches by score
 	std::sort(matches.begin(), matches.end());
@@ -139,6 +163,52 @@ void alignImages(Mat &im1, Mat &im2, Mat &im1Reg, Mat &h)
 */
 int main(int argc, char **argv)
 {
+	////////////////////////////////////////////////////////
+	//                                                   ///
+	//**       Calibration homography                  **///
+	//                                                   ///
+	////////////////////////////////////////////////////////
+	//Reding calibration image
+	string calib1Filename("calib1.jpg");
+	cout << "Reading calib1 image: " << calib1Filename << endl;
+	Mat imCalib1 = imread(calib1Filename);
+
+	string calib2Filename("calib2.jpg");
+	cout << "Reading calib1 image: " << calib2Filename << endl;
+	Mat imCalib2 = imread(calib2Filename);
+
+	// Create a matrix of the same type and size as src (for dst)
+	dstCalib1.create(srcCalib1.size(), srcCalib1.type());
+	dstCalib2.create(srcCalib2.size(), srcCalib2.type());
+
+	//Detect edge using canny algorimths
+	//store image
+	srcCalib1 = imCalib1;
+	srcCalib2 = imCalib2;
+
+	//Transfer image to gray
+	cvtColor(srcCalib1, srcCalib_gray1, CV_BGR2GRAY);
+	cvtColor(srcCalib2, srcCalib_gray2, CV_BGR2GRAY);
+
+	//imReference convert to edge detect
+	CannyThresholdCalib(100);
+
+	// Registered image will be resotred in imReg. 
+	// The estimated homography will be stored in h. 
+	Mat imRegCalib, hCalib;
+
+	// Align images
+	cout << "Calibration images ..." << endl;
+	alignImages(dstCalib1, dstCalib2, imRegCalib, hCalib);
+
+
+	// Print estimated homography
+	cout << "Estimated calibra-homography : \n" << hCalib << endl;
+	////////////////////////////////////////////////////////
+	//                                                   ///
+    //**       Calculate homograph with real image     **///
+	//                                                   ///
+	////////////////////////////////////////////////////////
 	// Read reference image
 	string refFilename("form.jpg");
 	cout << "Reading reference image : " << refFilename << endl;
@@ -155,6 +225,7 @@ int main(int argc, char **argv)
 	dst2.create(src2.size(), src2.type());
 
 	//Detect edge using canny algorimths
+	//store image
 	src1 = imReference;
 	src2 = im;
 
@@ -178,9 +249,10 @@ int main(int argc, char **argv)
 	cout << "Saving aligned image : " << outFilename << endl;
 	imwrite(outFilename, imReg);
 
+
 	// Print estimated homography
 	cout << "Estimated homography : \n" << h << endl;
-
+	cout << "Type of homograph matrix : " << typeid(h).name() << endl;
 	//Display the image sec
 	waitKey(0);
 
